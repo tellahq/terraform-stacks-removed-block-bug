@@ -3,6 +3,11 @@ required_providers {
     source  = "hashicorp/random"
     version = "~> 3.6"
   }
+  time = {
+    source  = "hashicorp/time"
+    version = "~> 0.12"
+  }
 }
 
 provider "random" "this" {}
+provider "time" "this" {}

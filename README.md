@@ -1,90 +1,88 @@
 # Terraform Stacks `removed` Block Bug — Minimal Reproduction
 
-Demonstrates a bug where a `removed` block that successfully destroys resources
-errors with "Unassigned variable... This is a bug in Terraform" for every module
-variable that was not explicitly passed in the component's `inputs` block.
+Demonstrates a bug where a `removed` block errors with "Unassigned variable...
+This is a bug in Terraform" for module variables that have defaults but were not
+explicitly passed in the component's `inputs` block.
 
 Tracked in: hashicorp/terraform#XXXXX
 
+## Theory: Convergence Plans After Slow Destroys
+
+We believe the bug only triggers during **convergence plans** that TFC schedules
+after a **long-running destroy**. With `random_pet` (which destroys instantly),
+the destroy completes before TFC schedules a convergence plan, so the removed
+block is never re-evaluated against cleared state.
+
+Real AWS resources like Aurora clusters take 5-15 minutes to delete. During that
+window, TFC schedules convergence plans that re-evaluate the removed block. At
+that point, `PlanPrevInputs()` returns an empty map (destroy has cleared the
+component state), and `checkInputVariables()` finds declared module variables
+that were never in the component's `inputs` block, erroring on each one.
+
+To simulate this, we use `time_sleep` with `destroy_duration = "300s"` — this
+forces the destroy to take 5 minutes, giving TFC enough time to schedule a
+convergence plan while the destroy is still in progress.
+
 ## The Bug Trigger
 
-There are TWO ingredients required:
+Two ingredients are required:
 
 ### 1. Module variables with defaults not in component inputs
 
-Modules often have many variables with sensible defaults — only a subset are
-overridden via component inputs. Those default-only variables are never stored
-in state. After destroy, `PlanPrevInputs()` returns an empty map, and
-`checkInputVariables()` errors on every declared variable.
+The `database` module declares `extra_tags`, `storage_size_gb`, and
+`enable_backups` with defaults. These are NOT passed in the component's `inputs`
+block. After destroy clears stored inputs, `PlanPrevInputs()` returns an empty
+map, and `checkInputVariables()` errors on every declared variable not found in
+that map.
 
-### 2. Multiple deployments where some NEVER had the component enabled
+### 2. A long-running destroy that triggers a convergence plan
 
-This is the critical detail. When multiple deployments share the same component
-configuration, the `removed` block evaluates for ALL deployments. A deployment
-that never created the component still has the removed block claim instances
-via `for_each`. TFC evaluates the module for that deployment's state (which is
-empty for this component), and the variable validation fails.
-
-In the real-world case: three deployments (dev, stage, prod). Only stage ever
-had Aurora/OpenSearch enabled. Dev and prod never did. When stage disables
-Aurora, the removed block evaluates for all three deployments. Dev and prod
-have no prior state for this component, triggering the bug.
+When TFC runs a destroy that takes minutes (not milliseconds), it schedules a
+convergence plan while the destroy is still running. The convergence plan
+re-evaluates the `removed` block against state that has already been partially
+or fully cleared, triggering the variable validation bug.
 
 ## Prerequisites
 
 - An HCP Terraform account with Stacks enabled
 - A Stack connected to a fork/clone of this repository
-- No cloud credentials needed — uses only `hashicorp/random` provider
+- No cloud credentials needed — uses only `hashicorp/random` and `hashicorp/time`
 
 ## Repository Structure
 
 ```
-components.tfcomponent.hcl   # 3 components: database (conditional), cache (conditional), app (always)
-deployments.tfdeploy.hcl     # 2 deployments: dev (never enables database), stage (enables then disables)
+components.tfcomponent.hcl   # database component (conditional) + removed block
+deployments.tfdeploy.hcl     # Single deployment with enable_database = true
+providers.tfcomponent.hcl    # random + time providers
 variables.tfcomponent.hcl    # Stack-level variables
 modules/
-  database/                  # Conditional component (like temporal-aurora). Has vars with defaults not in inputs.
-  cache/                     # Second conditional component (like temporal-opensearch). Tests multiple removed blocks.
-  app/                       # Always-on component that references database/cache outputs cross-component.
+  database/                  # Uses random_pet + time_sleep (5min destroy). Has vars with defaults not in inputs.
 ```
-
-## How the reproduction works
-
-This repro mirrors the real infrastructure pattern:
-
-- **Two deployments** ("dev" and "stage") — dev never enables database, stage does
-- **Conditional components** using `var.enable_database ? var.regions : toset([])`
-- **Cross-component references** — the "app" component reads database/cache outputs
-- **Multiple removed blocks** — both database and cache have removed blocks
-- **Unpassed module variables** — database and cache modules declare variables with
-  defaults that are never passed via component inputs
-
-**This requires TWO separate deployment runs** — you cannot reproduce it in a single apply.
 
 ## Steps to Reproduce
 
 > **Important:** Each step is a separate git push that triggers a separate TFC
 > Stack deployment run. Wait for each run to complete before proceeding.
 
-### Step 1: Deploy with the component enabled (first apply)
+### Step 1: Deploy with the component enabled
 
-1. Verify `deployments.tfdeploy.hcl` has `enable_database = true` in the "stage" deployment.
+1. Verify `deployments.tfdeploy.hcl` has `enable_database = true`.
 2. Push this repo to the branch your Stack is tracking.
-3. In HCP Terraform, approve and apply BOTH deployments (dev and stage).
-4. **Wait for both runs to complete successfully.** Stage creates `random_pet` resources.
-   Dev creates only the "app" component (no database).
+3. In HCP Terraform, approve and apply the deployment.
+4. **Wait for the run to complete.** The deployment creates `random_pet` and
+   `time_sleep` resources.
 
-### Step 2: Disable the component and deploy again (second apply — triggers the bug)
+### Step 2: Disable the component (triggers the bug)
 
-1. In `deployments.tfdeploy.hcl`, change stage's `enable_database = true` to `enable_database = false`.
-2. Commit and push the change. This triggers new TFC Stack runs for both deployments.
+1. In `deployments.tfdeploy.hcl`, change `enable_database = true` to
+   `enable_database = false`.
+2. Commit and push. This triggers a new TFC Stack run.
 3. In HCP Terraform, approve and apply.
-4. **Expected bug:** The removed block evaluates for BOTH deployments:
-   - **Stage:** Destroy runs, removes resources. Post-destroy validation may fail.
-   - **Dev:** Removed block tries to claim `component.database["us-east-1"]` which
-     never existed in dev's state. `PlanPrevInputs()` returns empty map.
-     `checkInputVariables()` finds declared variables (`extra_tags`, `storage_size_gb`,
-     `enable_backups`) unassigned and errors:
+4. The `removed` block activates. The destroy begins and takes ~5 minutes
+   (due to `time_sleep.simulate_slow_destroy`).
+5. **Expected bug:** During the slow destroy, TFC schedules a convergence plan
+   that re-evaluates the removed block. `PlanPrevInputs()` returns an empty map,
+   and `checkInputVariables()` errors:
 
 ```
 Error: Unassigned variable
@@ -103,7 +101,7 @@ The stack is now stuck. Every option leads to an error:
 
 ## Workaround (from production experience)
 
-The only workaround found was to temporarily empty all module files (zero variables,
-zero resources, zero outputs) so `checkInputVariables()` iterates zero times. After
-applying that, restore module files and delete removed blocks. This required 4
-separate PRs/applies in production.
+The only workaround found was to temporarily empty all module files (zero
+variables, zero resources, zero outputs) so `checkInputVariables()` iterates
+zero times. After applying that, restore module files and delete removed blocks.
+This required 4 separate PRs/applies in production.
