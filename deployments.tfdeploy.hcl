@@ -10,7 +10,7 @@ deployment "stage" {
   inputs = {
     environment     = "stage"
     regions         = ["us-east-2"]
-    enable_database = true
+    enable_database = false
   }
 }
 
