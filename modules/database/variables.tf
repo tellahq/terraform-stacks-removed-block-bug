@@ -1,6 +1,6 @@
 variable "environment" {
   type    = string
-  default = "dev"
+  default = "removed"
 }
 
 variable "name_prefix" {
@@ -13,9 +13,14 @@ variable "pet_count" {
   default = 2
 }
 
-# These variables have defaults and are intentionally NOT passed
-# in the component inputs block. This is the trigger for the bug —
-# they're never stored in state, so PlanPrevInputs() won't include them.
+# Variables with defaults that are NOT passed in component inputs.
+# In the real infra, temporal-aurora has variables like reader_instance_class,
+# default_store_username, visibility_store_username that have defaults but
+# are not in the component's inputs block.
+#
+# BUG: After destroy clears stored inputs, PlanPrevInputs() returns an empty
+# map. checkInputVariables() then finds these declared variables unassigned
+# and errors with "Unassigned variable... This is a bug in Terraform."
 variable "extra_tags" {
   type    = map(string)
   default = {}
