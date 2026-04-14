@@ -10,8 +10,3 @@ variable "enable_database" {
   type    = bool
   default = false
 }
-
-variable "enable_cache" {
-  type    = bool
-  default = false
-}

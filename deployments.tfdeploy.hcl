@@ -3,7 +3,6 @@ deployment "dev" {
     environment     = "dev"
     regions         = ["us-east-2"]
     enable_database = false
-    enable_cache    = false
   }
 }
 
@@ -11,8 +10,7 @@ deployment "stage" {
   inputs = {
     environment     = "stage"
     regions         = ["us-east-2"]
-    enable_database = false
-    enable_cache    = false
+    enable_database = true
   }
 }
 
@@ -21,6 +19,5 @@ deployment "prod" {
     environment     = "prod"
     regions         = ["us-east-2"]
     enable_database = false
-    enable_cache    = false
   }
 }

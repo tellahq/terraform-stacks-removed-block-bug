@@ -1,6 +1,12 @@
 # =============================================================================
 # Conditional database component (like temporal-aurora in real infra)
 # Enabled per-deployment via enable_database variable.
+#
+# Deletion happens implicitly via for_each switching to toset([]).
+# There is NO explicit removed block — TFC handles the destroy automatically.
+# This is what triggers a convergence plan: the apply includes both a component
+# deletion (database) AND an update to another component (app), so TFC runs
+# Plan → Apply → Convergence Plan. The bug fires on the convergence plan.
 # =============================================================================
 
 component "database" {
@@ -20,41 +26,14 @@ component "database" {
   }
 }
 
-# Claim database instances in state for destroy when enable_database = false.
-# The module variables have defaults so the removed block can resolve them
-# without inputs from the component block.
-# Safe to delete this block once TFC state no longer contains database.
-removed {
-  for_each = var.enable_database ? toset([]) : var.regions
-  from     = component.database[each.value]
-  source   = "./modules/database"
-
-  providers = {
-    random = provider.random.regional[each.value]
-    time   = provider.time.this
-  }
-}
-
-# =============================================================================
-# Legacy component — fully removed (no component block remains).
-# This mirrors temporal-aurora-mysql in real infra: the component was deleted
-# in a previous version, only the removed block remains to clean up state.
-# Safe to delete once TFC state no longer contains legacy.
-# =============================================================================
-
-removed {
-  for_each = var.regions
-  from     = component.legacy[each.value]
-  source   = "./modules/legacy"
-
-  providers = {
-    random = provider.random.regional[each.value]
-  }
-}
-
 # =============================================================================
 # App component — always deployed, references conditional database outputs.
 # This mirrors eks-addons referencing temporal-aurora outputs in real infra.
+#
+# The random_id resource uses database_endpoint as a keeper, so when the
+# endpoint changes from a real value to "none" (database disabled), the
+# resource gets recreated — a real change that forces TFC to include app
+# in the same apply as the database deletion.
 # =============================================================================
 
 component "app" {
