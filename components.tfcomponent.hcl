@@ -17,7 +17,7 @@ component "database" {
 # After successful destroy, this block triggers the bug:
 # "Unassigned variable... This is a bug in Terraform"
 removed {
-  from   = component.database
+  from   = component.database[each.value]
   source = "./modules/database"
 
   for_each = var.enable_database ? toset([]) : toset(["this"])
