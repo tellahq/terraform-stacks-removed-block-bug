@@ -6,6 +6,6 @@ deployment "default" {
     environment     = "demo"
     name_prefix     = "repro"
     pet_count       = 2
-    enable_database = true # Step 1: apply with true. Step 2: change to false and apply again.
+    enable_database = false # Step 2: toggled to false to trigger the removed block bug.
   }
 }
