@@ -1,7 +1,6 @@
 resource "random_pet" "database_name" {
-  count  = var.pet_count
   length = 3
-  prefix = "${var.name_prefix}-${var.environment}-${var.storage_size_gb}gb"
+  prefix = "${var.name_prefix}-${var.environment}"
 }
 
 # Simulate a long-running destroy (like an Aurora cluster deletion).
@@ -14,18 +13,6 @@ resource "time_sleep" "simulate_slow_destroy" {
   destroy_duration = "300s"
 
   triggers = {
-    pet_id = random_pet.database_name[0].id
+    pet_id = random_pet.database_name.id
   }
-}
-
-output "database_names" {
-  value = random_pet.database_name[*].id
-}
-
-output "backups_enabled" {
-  value = var.enable_backups
-}
-
-output "tags" {
-  value = var.extra_tags
 }
