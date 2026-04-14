@@ -15,7 +15,7 @@ component "database" {
     # are declared in the module with defaults but intentionally omitted.
   }
   providers = {
-    random = provider.random.this
+    random = provider.random.regional[each.value]
     time   = provider.time.this
   }
 }
@@ -30,7 +30,7 @@ removed {
   source   = "./modules/database"
 
   providers = {
-    random = provider.random.this
+    random = provider.random.regional[each.value]
     time   = provider.time.this
   }
 }
@@ -48,7 +48,7 @@ removed {
   source   = "./modules/legacy"
 
   providers = {
-    random = provider.random.this
+    random = provider.random.regional[each.value]
   }
 }
 
