@@ -3,6 +3,6 @@ deployment "dev" {
     environment     = "dev"
     name_prefix     = "dev-repro"
     pet_count       = 2
-    enable_database = true
+    enable_database = false
   }
 }
