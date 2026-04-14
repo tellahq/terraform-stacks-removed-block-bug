@@ -2,9 +2,26 @@
 
 Demonstrates a bug where a `removed` block that successfully destroys resources
 errors with "Unassigned variable... This is a bug in Terraform" for every module
-variable — even when all variables have defaults.
+variable that was not explicitly passed in the component's `inputs` block.
 
 Tracked in: hashicorp/terraform#XXXXX
+
+## The Bug Trigger
+
+The key pattern is **module variables with defaults that are NOT passed in the
+component's `inputs` block**. In a real-world setup, modules often have many
+variables with sensible defaults — only a subset are overridden via component
+inputs. Those default-only variables are never stored in state.
+
+After destroy, `PlanPrevInputs()` calls `InputsForComponent()` which only returns
+variables that were explicitly stored (i.e., passed via `inputs`). Variables that
+relied on their defaults are missing from the returned map. When
+`checkInputVariables()` iterates over ALL declared module variables and checks
+each one exists in `SetVariables`, the default-only variables fail the check.
+
+In this repro, the module declares 6 variables but only 3 are passed in the
+component `inputs` block. The other 3 (`extra_tags`, `storage_size_gb`,
+`enable_backups`) have defaults and are intentionally omitted from `inputs`.
 
 ## Prerequisites
 
@@ -16,8 +33,12 @@ Tracked in: hashicorp/terraform#XXXXX
 
 This repro uses a single component (`database`) that creates `random_pet` resources.
 A boolean variable `enable_database` controls whether the component is active (via
-`for_each`) or being destroyed (via a `removed` block). The bug is triggered by
-deploying with the component enabled, then deploying again with it disabled.
+`for_each`) or being destroyed (via a `removed` block). The module has 6 variables
+but only 3 are passed in the component's `inputs` block — the other 3 rely on their
+defaults and are never stored in state.
+
+The bug is triggered by deploying with the component enabled, then deploying again
+with it disabled.
 
 **This requires TWO separate deployment runs** — you cannot reproduce it in a single apply.
 
@@ -44,12 +65,14 @@ deploying with the component enabled, then deploying again with it disabled.
 
 ```
 Error: Unassigned variable
-The input variable "environment" has not been assigned a value.
+The input variable "extra_tags" has not been assigned a value.
 This is a bug in Terraform; please report it in a GitHub issue.
 ```
 
-This error repeats for every variable declared in the module (`environment`,
-`name_prefix`, `pet_count`), even though all three have defaults.
+This error fires for every variable that was NOT in the component's `inputs`
+block (`extra_tags`, `storage_size_gb`, `enable_backups`). These variables have
+defaults and work fine during normal plans — the error only appears after destroy,
+when `PlanPrevInputs()` can't find them in state because they were never stored.
 
 ### Step 3: Observe the catch-22 (no resolution possible)
 

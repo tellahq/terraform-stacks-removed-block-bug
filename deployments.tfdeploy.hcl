@@ -6,6 +6,6 @@ deployment "default" {
     environment     = "demo"
     name_prefix     = "repro"
     pet_count       = 2
-    enable_database = false # Step 2: toggled to false to trigger the removed block bug.
+    enable_database = true # Step 1: deploy with component enabled first.
   }
 }
