@@ -26,6 +26,20 @@ component "database" {
   }
 }
 
+# Claim orphaned database state after implicit deletion left unclaimed instances.
+# This mirrors the real infra pattern where we added removed blocks after getting
+# "Unclaimed component instance" errors.
+removed {
+  for_each = var.enable_database ? toset([]) : var.regions
+  from     = component.database[each.value]
+  source   = "./modules/database"
+
+  providers = {
+    random = provider.random.regional[each.value]
+    time   = provider.time.this
+  }
+}
+
 # =============================================================================
 # App component — always deployed, references conditional database outputs.
 # This mirrors eks-addons referencing temporal-aurora outputs in real infra.
